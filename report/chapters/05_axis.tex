@@ -1,0 +1,97 @@
+\chapter{Coordinate Axis in the 3D View}
+\label{ch:axis}
+
+\emph{Pull request: \#132.}
+
+\section{Overview}
+A 3D model is much easier to read when the viewer always shows which way is X, Y, and Z. PR
+\#132 added a colour-coded coordinate-axis gizmo (a \emph{triad}) to the 3D CAD view that stays
+locked to the camera orientation as the user rotates the model. The same PR used the occasion
+to tidy the toolbar: operations that only make sense for the 2D plots are now hidden when the
+3D CAD view is active, and vice versa.
+
+\section{The Axis Triad Overlay}
+The triad is implemented as a lightweight \texttt{QWidget} overlay,
+\texttt{AxisTriadOverlay}, in \texttt{desktop/ui/utils/custom\_3dviewer.py}. Rather than adding
+geometry to the OCC scene, it paints an XYZ gizmo directly with \texttt{QPainter} and keeps it
+in sync with the OCC camera. On each tick it reads the view's Eye/At/Up vectors from the
+\texttt{V3d\_View}, projects the three world axes to the screen, and repaints---so the gizmo
+rotates exactly as the model does.
+
+\begin{lstlisting}[caption={Camera-synchronised axis triad (\texttt{custom\_3dviewer.py}).},label={lst:triad}]
+class AxisTriadOverlay(QWidget):
+    """A QPainter-based XYZ axis gizmo that tracks the OCC camera."""
+
+    def start(self):
+        """Show the gizmo and begin polling the camera orientation."""
+        self.show()
+        self._timer.start()
+
+    def stop(self):
+        """Hide the gizmo and stop polling."""
+        self._timer.stop()
+        self.hide()
+
+    def _sync_from_view(self):
+        """Read Eye/At/Up from the V3d_View and compute screen projections."""
+        # ... vector math projecting the world axes to screen space ...
+
+    def paintEvent(self, event):
+        # red = X, dark green = Y, blue = Z
+        self._draw_arrow(...)   # shaft, arrowhead, and axis letter
+\end{lstlisting}
+
+The overlay is created by the viewer and positioned in the bottom-right corner by
+\texttt{\_position\_axis\_triad}; its visibility is managed alongside the view's own
+\texttt{showEvent}, \texttt{hideEvent}, and view-cube display so it never lingers when the CAD
+view is hidden.
+
+\section{Toolbar Integration}
+The axis is driven from the toolbar through the controller introduced in
+Chapter~\ref{ch:toolbar}. A new \texttt{\_cad\_toggle\_axis} handler reads the axis button's
+checked state and starts or stops the triad, keeping the button's visual state in sync:
+
+\begin{lstlisting}[caption={Toolbar handler for the axis toggle (\texttt{toolbar\_controller.py}).},label={lst:axistoggle}]
+def _cad_toggle_axis(self):
+    triad = self._cad_widget.viewer._axis_triad
+    if self._btn_axis.isChecked():
+        triad.start()
+    else:
+        triad.stop()
+    self._sync_btn_to(self._btn_axis, self._btn_axis.isChecked())
+\end{lstlisting}
+
+\section{Context-Aware Toolbar Filtering}
+The plate-girder plots and the 3D CAD view do not share the same set of meaningful controls.
+PR~\#132 therefore made the toolbar \emph{context-aware}: when binding to the 3D CAD view the
+controller hides the plot-only widgets (grid, supports, loads, and the scale controls), and it
+restores them when binding back to the plots view or resetting. The axis button is explicitly
+\emph{not} hidden, because it is meaningful in the CAD view.
+
+\begin{lstlisting}[caption={Hiding and restoring plot-only widgets per active view (\texttt{toolbar\_controller.py}).},label={lst:filter}]
+def _hide_plots_only_widgets(self):
+    """Hide grid, supports, loads buttons and scale controls (CAD view)."""
+
+def _show_plots_only_widgets(self):
+    """Restore the plot-only widgets (Plots view / neutral state)."""
+
+def bind_to_cad_3d(self, cad_widget):
+    ...
+    self._hide_plots_only_widgets()   # axis button stays: active in CAD view
+\end{lstlisting}
+
+As a small related refinement, the default plot display states in
+\texttt{mpl\_plot\_widget.py} for nodes, supports, and girder labels were changed to default
+\emph{off}, giving a cleaner initial plot that the user can build up with the toggles.
+
+\section{Result}
+The 3D CAD view now carries a camera-synchronised XYZ triad in its corner, toggled from the
+toolbar, and the toolbar presents only the controls relevant to the currently active view.
+
+%% IMAGE NEEDED: axis_triad.png -- 3D view showing the colour-coded XYZ axis triad in the corner
+\osdagfig{axis_triad.png}{The colour-coded coordinate-axis triad (red X, green Y, blue Z) in
+the corner of the 3D CAD view.}{fig:axis}
+
+\section{Summary}
+This chapter added a QPainter-based coordinate-axis triad that tracks the OCC camera, wired it
+into the toolbar, and made the toolbar hide controls that are irrelevant to the active view.

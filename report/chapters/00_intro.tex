@@ -1,0 +1,111 @@
+\chapter{Introduction}
+\label{ch:intro}
+
+This report documents the work I carried out during my FOSSEE semester-long internship
+on the \textbf{OsdagBridge} project. Before describing the technical contributions, this
+chapter introduces the institutional context of the internship---the National Mission on
+Education through ICT, the FOSSEE project, the Osdag software, and finally the OsdagBridge
+sub-project on which all of my work was done.
+
+\section{National Mission in Education through ICT}
+The National Mission on Education through ICT (NMEICT) is a scheme under the Department of
+Higher Education, Ministry of Education, Government of India. It aims to leverage the
+potential of ICT to enhance teaching and learning in Higher Education Institutions in an
+anytime--anywhere mode. The mission aligns with the three cardinal principles of the
+Education Policy---access, equity, and quality---by:
+\begin{itemize}[leftmargin=1.4em]
+  \item Providing connectivity and affordable access devices for learners and institutions.
+  \item Generating high-quality e-content free of cost.
+\end{itemize}
+NMEICT seeks to bridge the digital divide by empowering learners and teachers in urban and
+rural areas, fostering inclusivity in the knowledge economy. Key focus areas include the
+development of e-learning pedagogies and virtual laboratories, online testing and
+certification, and the training of teachers to adopt ICT-based methods. For further details,
+visit \url{www.nmeict.ac.in}.
+
+\subsection{ICT Initiatives of MoE}
+The Ministry of Education has launched several ICT initiatives aimed at students,
+researchers, and institutions---such as SWAYAM, the National Digital Library, e-Yantra,
+Spoken Tutorial, Virtual Labs, and FOSSEE---covering audio-video e-content, digital content
+access, hands-on learning, and e-governance.
+
+\section{FOSSEE Project}
+The FOSSEE (Free/Libre and Open Source Software for Education) project promotes the use of
+FLOSS tools in academia and research. It is part of the National Mission on Education through
+ICT, Ministry of Education, Government of India. FOSSEE supports a range of activities such
+as the Textbook Companion, Lab Migration, and the development and maintenance of open-source
+scientific and engineering software.
+
+\subsection{Internships and Fellowships}
+Students from any degree and academic stage can apply for FOSSEE internships. Selection is
+based on the completion of screening tasks involving programming, scientific computing, or
+data collection that benefit the FLOSS community. My own selection followed the completion of
+such a screening task on the Osdag codebase, after which I joined the OsdagBridge development
+effort.
+
+%% IMAGE NEEDED: fossee_activities.png -- (optional) FOSSEE projects & activities graphic
+\osdagfig{fossee_activities.png}{FOSSEE projects and activities.}{fig:fossee}
+
+\section{Osdag Software}
+Osdag (Open Steel Design and Graphics) is a cross-platform, free/libre and open-source
+software for the detailing and design of steel structures based on the Indian Standard
+IS~800:2007. It allows users to design steel connections, members, and systems through an
+interactive graphical user interface (GUI) and provides 3D visualizations of the designed
+components. The software enables easy export of CAD models to drafting tools for
+construction and fabrication drawings. Built on Python and several Python-based FLOSS tools
+(notably PyQt and PythonOCC), Osdag is licensed under the GNU Lesser General Public License
+(LGPL) Version~3.
+
+\subsection{Osdag GUI}
+The Osdag GUI is designed to be user-friendly and interactive. It consists of:
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Input Dock:} Collects and validates user inputs.
+  \item \textbf{Output Dock:} Displays design results after validation.
+  \item \textbf{CAD Window:} Displays the 3D CAD model, where users can pan, zoom, and rotate
+        the design.
+  \item \textbf{Message Log:} Shows errors, warnings, and suggestions based on design checks.
+\end{itemize}
+Each of these four areas features directly in my internship work: I extended the CAD Window
+with node and grillage visualisation and a full navigation toolbar, added validators to the
+Input Dock, contributed to the design-report generation pipeline, and added a dedicated log
+chapter to the report.
+
+\section{OsdagBridge}
+\textbf{OsdagBridge} is the bridge-design extension of the Osdag ecosystem. Where the core
+Osdag software targets steel connections and members, OsdagBridge focuses on the design of
+steel--concrete composite \emph{plate-girder bridges}. It reuses the Osdag GUI paradigm---an
+Input Dock, an Output Dock, a 3D CAD window, and a message log---while adding
+bridge-specific geometry (girders, cross bracings, end diaphragms, deck slab, shear studs,
+railings, and medians), plate-girder design calculations, and an automatically generated,
+IS-code-based design report.
+
+All of the work described in this report was contributed to the OsdagBridge repository
+maintained at \texttt{Aditya-Donde/OsdagBridge} under the username \texttt{OmPathania21}.
+
+\section{Scope of this Internship}
+My contributions span the full breadth of the OsdagBridge application and are grouped, in the
+order in which I worked on them, as follows:
+\begin{enumerate}[leftmargin=1.6em]
+  \item \textbf{3D CAD viewer} --- node information on hover, node numbering, a grillage view
+        connecting the structural nodes, and show/hide toggles (Chapter~\ref{ch:cad}).
+  \item \textbf{Toolbar system} --- a dedicated toolbar controller wiring zoom, pan, rotate,
+        and zoom-window camera operations, together with label-visibility toggles and later
+        state-management fixes (Chapter~\ref{ch:toolbar}).
+  \item \textbf{Bridge geometry} --- dynamic geometry keys and a shear-stud solver in the
+        plate-girder bridge module (Chapter~\ref{ch:geometry}).
+  \item \textbf{Coordinate axis} --- an always-visible coordinate axis in the 3D view with
+        context-aware toolbar filtering (Chapter~\ref{ch:axis}).
+  \item \textbf{Design report generation} --- the single largest part of my work: building
+        multiple chapters, sections, and summary tables of the automatically generated PDF
+        design report, along with report customisation and a log-window chapter
+        (Chapter~\ref{ch:report}).
+  \item \textbf{Report plot capture and zoom} --- capturing Matplotlib plots into the report
+        and a zoom window for plots (Chapter~\ref{ch:plots}).
+  \item \textbf{UI/UX enhancements} --- a custom cursor, a legend toggle, and conditional
+        visibility for optional bridge components (Chapter~\ref{ch:ui}).
+  \item \textbf{Material input validators} --- validation of custom material properties in the
+        Input Dock (Chapter~\ref{ch:validators}).
+\end{enumerate}
+
+The remainder of this report describes each of these areas in turn, with the relevant code
+from my pull requests, followed by a concluding chapter of lessons learned.

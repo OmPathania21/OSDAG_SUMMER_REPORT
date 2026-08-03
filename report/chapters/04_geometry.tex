@@ -1,0 +1,91 @@
+\chapter{Bridge Geometry and Shear-Stud Solver}
+\label{ch:geometry}
+
+\emph{Pull request: \#116.}
+
+\section{Overview}
+Up to this point my work had been on the frontend. PR~\#116 moved into the \texttt{core}
+backend to compute a piece of real bridge geometry: the \emph{shear studs} that connect the
+steel girders to the concrete deck slab in a composite plate-girder bridge. This chapter
+describes the code-based geometry formulas I added, the dynamic keys used to store the results,
+and a new solver method that acts as the central entry point for derived component geometry.
+
+\section{Motivation}
+Previously, shear-stud head dimensions were effectively fixed values. For a design tool that
+claims IS/IRC compliance, these dimensions must instead be \emph{derived} from the stud
+diameter according to the governing codes, and stored in the output so that both the 3D model
+and the design report can display them. The work therefore had three parts: encode the code
+formulas, define keys to hold the computed values, and wire a solver that runs the computation
+as part of the design.
+
+\section{Geometry Formulas}
+The formulas live in a dedicated geometry module,
+\texttt{core/bridge\_components/super\_structure/shear\_studs/geometry.py}. Two functions
+compute the minimum head diameter and minimum head height of a stud from its shank diameter,
+each citing the code clause it implements:
+
+\begin{lstlisting}[caption={Code-based shear-stud head geometry (\texttt{shear\_studs/geometry.py}).},label={lst:studgeom}]
+def min_stud_head_diameter(d_stud_mm: float) -> float:
+    """Minimum stud head diameter.  [IRC 22:2015 - Cl. 606.6]
+       min_head_diameter = 1.5 * d_stud"""
+    return round(1.5 * d_stud_mm, 2)
+
+def min_stud_head_height(d_stud_mm: float) -> float:
+    """Minimum stud head height.  [IS 3935:1966]
+       min_head_height = 0.667 * d_stud"""
+    return round(0.667 * d_stud_mm, 2)
+\end{lstlisting}
+
+\noindent The two governing relations are therefore
+\[
+  d_{\text{head,min}} = 1.5\,d_{\text{stud}} \quad\text{[IRC 22:2015, Cl.\ 606.6]},
+  \qquad
+  h_{\text{head,min}} = 0.667\,d_{\text{stud}} \quad\text{[IS 3935:1966]}.
+\]
+
+\section{Dynamic Keys}
+So that the computed values can flow through the rest of the application in a consistent,
+namespaced way, two keys were added in \texttt{core/utils/common.py}:
+
+\begin{lstlisting}[caption={Namespaced keys for the derived stud geometry (\texttt{core/utils/common.py}).},label={lst:studkeys}]
+KEY_DS_STUD_HEAD_DIAMETER = "design_options.shear_studs.head_diameter"
+KEY_DS_STUD_HEAD_HEIGHT   = "design_options.shear_studs.head_height"
+\end{lstlisting}
+
+Using dotted, namespaced key strings keeps the output dictionary self-describing and makes the
+values easy to look up later when building the design report (Chapter~\ref{ch:report}).
+
+\section{The Bridge-Component Solver}
+The formulas are invoked from a new solver on the \texttt{PlateGirderBridge} class in
+\texttt{core/bridge\_types/plate\_girder/plategirderbridge.py}. I deliberately introduced a
+single public entry point, \texttt{bridge\_component\_solver}, that dispatches to per-component
+private solvers---starting with \texttt{\_solve\_shear\_studs}---so that future derived
+components (bracings, diaphragms, and so on) can be added in the same place without changing the
+call site.
+
+\begin{lstlisting}[caption={Central solver dispatch and the shear-stud solver (\texttt{plategirderbridge.py}).},label={lst:solver}]
+def bridge_component_solver(self) -> None:
+    """Central entry point for derived bridge-component geometry."""
+    self._solve_shear_studs()
+    # ... placeholders for future derived components ...
+
+def _solve_shear_studs(self) -> None:
+    """Compute derived shear-stud geometry and store it in output_dict."""
+    d_stud = self.output_dict[KEY_DS_STUD_DIAMETER]
+    self.output_dict[KEY_DS_STUD_HEAD_DIAMETER] = min_stud_head_diameter(d_stud)
+    self.output_dict[KEY_DS_STUD_HEAD_HEIGHT]   = min_stud_head_height(d_stud)
+\end{lstlisting}
+
+\section{Result}
+Shear-stud head dimensions are now computed from the stud diameter using the IRC and IS
+formulas, stored under clear namespaced keys, and produced by a solver structured for easy
+extension. These values feed directly into the 3D geometry and the generated design report.
+
+%% IMAGE NEEDED: shear_studs_3d.png -- close-up of shear studs on a girder in the 3D CAD view
+\osdagfig{shear_studs_3d.png}{Shear studs on the top flange of a girder, with head geometry
+derived from the code formulas.}{fig:studs}
+
+\section{Summary}
+This chapter added the first backend computation of my internship: code-compliant shear-stud
+head geometry, dynamic keys to carry the results, and an extensible
+\texttt{bridge\_component\_solver} entry point in the plate-girder module.

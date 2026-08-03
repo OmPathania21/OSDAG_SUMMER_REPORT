@@ -1,0 +1,178 @@
+%==============================================================================
+%  FOSSEE Semester-Long Internship Report
+%  OsdagBridge -- Feature Development and Design-Report Integration
+%  Author : Om Pathania
+%
+%  Build : latexmk -pdf main.tex        (recommended)
+%     or : pdflatex main -> pdflatex main
+%
+%  Each chapter lives in its own file under chapters/ and is pulled in with
+%  \include below. The whole thing compiles into ONE pdf: main.pdf
+%==============================================================================
+\documentclass[11pt,a4paper,oneside]{report}
+
+%------------------------------------------------------------------ packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+%------------------------------------------------------------- graphics path
+\graphicspath{{images/}{../Media/}}
+
+%------------------------------------------------------------- colour scheme
+\definecolor{osdagblue}{RGB}{0,84,159}
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codekw}{RGB}{0,84,159}
+\definecolor{codecomment}{RGB}{102,153,102}
+\definecolor{codestring}{RGB}{170,55,55}
+\definecolor{codeframe}{RGB}{220,220,220}
+
+%---------------------------------------------------- ONE listings style (Python)
+\lstdefinestyle{osdag}{
+    language=Python,
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{codekw}\bfseries,
+    commentstyle=\color{codecomment}\itshape,
+    stringstyle=\color{codestring},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=8pt,
+    frame=single,
+    rulecolor=\color{codeframe},
+    breaklines=true,
+    breakatwhitespace=true,
+    showstringspaces=false,
+    tabsize=4,
+    captionpos=b,
+    xleftmargin=14pt,
+    framexleftmargin=14pt,
+    aboveskip=1em,
+    belowskip=1em,
+}
+\lstset{style=osdag}
+
+%----------------------------------------------------------- chapter heading style
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{osdagblue}}
+  {\chaptertitlename\ \thechapter}{16pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{10pt}{28pt}
+
+%------------------------------------------------------------------- headers
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+%----------------------------------------------------- consistent figure helper
+% Usage: \osdagfig{filename}{caption}{label}
+% Falls back to a labelled placeholder box when the image is not yet supplied,
+% so the report always compiles.
+\newcommand{\osdagfig}[3]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{images/#1}{%
+      \includegraphics[width=0.85\textwidth]{#1}%
+    }{%
+      \fbox{\parbox[c][5cm][c]{0.85\textwidth}{\centering\small
+        \textbf{IMAGE NEEDED}\\[4pt]\texttt{\detokenize{images/#1}}\\[6pt]\itshape #2}}%
+    }
+    \caption{#2}
+    \label{#3}
+  \end{figure}%
+}
+
+\captionsetup{font=small,labelfont=bf}
+
+%==============================================================================
+\begin{document}
+
+%--------------------------------------------------------------- TITLE PAGE
+\begin{titlepage}
+    \centering
+    %---------------------------------------------------- header logos
+    %  (matches the reference report: IIT Bombay left, FOSSEE right, no rule)
+    \noindent
+    \begin{minipage}[c]{0.48\textwidth}
+        \raggedright
+        \includegraphics[height=2.4cm]{IITB_image}
+    \end{minipage}\hfill
+    \begin{minipage}[c]{0.48\textwidth}
+        \raggedleft
+        \includegraphics[height=1.7cm]{Fossee_imgae}
+    \end{minipage}
+
+    \vspace{1.6cm}
+    {\huge\bfseries FOSSEE Semester-Long Internship Report\par}
+    \vspace{0.5cm}
+    {\LARGE On\par}
+    \vspace{0.4cm}
+    {\LARGE\bfseries\color{osdagblue} OsdagBridge --- Feature Development\\[6pt]
+     and Design-Report Integration\par}
+    \vspace{1.5cm}
+
+    {\LARGE Submitted by\par}
+    \vspace{0.4cm}
+    {\Huge\bfseries Om Pathania\par}
+    \vspace{0.3cm}
+    % TODO(om): confirm the four lines below
+    {\Large \emph{3rd year BTech Student}\par}
+    {\Large \emph{Department of Computer Science and Engineering}\par}
+    {\Large \emph{SRM Institute of Science and Technology}\par}
+    \vspace{1.5cm}
+
+    {\LARGE Under the Guidance of\par}
+    \vspace{0.3cm}
+    {\LARGE\bfseries Prof.\ Siddhartha Ghosh\par}
+    {\large Department of Civil Engineering\par}
+    {\large Indian Institute of Technology Bombay\par}
+    \vspace{1.0cm}
+
+    {\LARGE Mentor\par}
+    \vspace{0.3cm}
+    {\LARGE\bfseries \emph{Nidhi Khare}\par}
+    {\LARGE\bfseries \emph{Aditya Donde}\par}
+    \vspace{1.6cm}
+
+    {\Large \emph{July 26, 2026}\par}
+
+    \vfill
+\end{titlepage}
+
+%--------------------------------------------------------- ACKNOWLEDGMENTS
+\input{chapters/acknowledgments}
+
+%------------------------------------------------------------------ TOC
+\tableofcontents
+\listoffigures
+
+%------------------------------------------------------------- CHAPTERS
+\include{chapters/00_intro}
+\include{chapters/01_setup}
+\include{chapters/02_cad_viewer}
+\include{chapters/03_toolbar}
+\include{chapters/04_geometry}
+\include{chapters/05_axis}
+\include{chapters/06_report_gen}
+\include{chapters/07_plot_capture}
+\include{chapters/08_ui_polish}
+\include{chapters/09_validators}
+\include{chapters/10_conclusion}
+
+\end{document}

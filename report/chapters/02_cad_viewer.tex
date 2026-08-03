@@ -1,0 +1,162 @@
+\chapter{3D CAD Viewer: Nodes and Grillage}
+\label{ch:cad}
+
+\emph{Pull requests: \#96, \#105.}
+
+\section{Overview}
+The first area I worked on was the 3D CAD viewer. A plate-girder bridge model, as rendered by
+OpenCascade (OCC), shows the solid geometry of girders and the deck, but gives the user no
+insight into the underlying \emph{structural model}---the nodes and members that the analysis
+actually solves. My contribution added an interactive layer on top of the solid CAD model:
+sphere markers at every node, a \emph{grillage} of edges connecting the nodes, on-screen node
+numbers, and a hover tooltip that reports which node the cursor is over. All of these can be
+toggled on and off.
+
+The work touched three files in the desktop frontend:
+\begin{itemize}[leftmargin=1.4em]
+  \item \texttt{desktop/ui/cad\_3d.py} --- assembles the extra visualisation objects into the
+        scene.
+  \item \texttt{desktop/ui/utils/custom\_3dviewer.py} --- the OCC viewer wrapper, extended with
+        hover picking and navigation modes.
+  \item \texttt{core/ifc\_export\_bridge/bridge\_cad\_extraction.py} --- an IFC-export fix
+        (described in Section~\ref{sec:ifcfix}).
+\end{itemize}
+
+\section{Motivation}
+When inspecting a bridge design, an engineer needs to relate the visual model back to the
+analysis model: \emph{which node is this? which members frame into it?} Without node markers
+and numbers the 3D view is only a picture. By overlaying the analysis nodes and the grillage
+of members---and letting the user hover to identify a node---the viewer becomes a tool for
+verifying the model, not just displaying it.
+
+\section{Rendering the Nodes and Grillage}
+The building blocks are three private render methods on the CAD-scene class in
+\texttt{cad\_3d.py}. \texttt{\_render\_nodes} reads the live analysis model, places a small
+OCC sphere (\texttt{AIS\_Shape} over a \texttt{BRepPrimAPI\_MakeSphere}) at each node, and
+returns a dictionary mapping each node id to its coordinates so the other methods can reuse it.
+
+\begin{lstlisting}[caption={Node sphere markers, built from the live model (\texttt{cad\_3d.py}).},label={lst:rendernodes}]
+def _render_nodes(self) -> dict:
+    """Build node sphere markers from the live model.
+    Returns a dict mapping node id -> (x_mm, y_mm, z_mm)."""
+    nodes, members = results_data._build_nodes_members()
+    node_positions = {}
+    node_ais_list = []
+    for nid, (x_mm, y_mm, z_mm) in nodes.items():
+        vis = AIS_Shape(
+            BRepPrimAPI_MakeSphere(gp_Pnt(x_mm, y_mm, z_base), NODE_R).Shape()
+        )
+        node_ais_list.append(vis)
+        node_positions[nid] = (x_mm, y_mm, z_mm)
+    self.viewer.model_ais_objects["Node"] = node_ais_list
+    return node_positions
+\end{lstlisting}
+
+The grillage is drawn by \texttt{\_render\_grillage}, which walks the member list and creates a
+straight OCC edge (\texttt{BRepBuilderAPI\_MakeEdge}) between each connected pair of nodes. The
+resulting objects are stored under the \texttt{"Grillage"} key so they can be shown or hidden
+as a group.
+
+\begin{lstlisting}[caption={Grillage overlay: one edge per member (\texttt{cad\_3d.py}).},label={lst:grillage}]
+def _render_grillage(self, node_positions: dict) -> None:
+    """Draw member edges between nodes to form the grillage overlay."""
+    grillage_ais = []
+    for node_pair in members.values():
+        n1, n2 = node_pair
+        edge = BRepBuilderAPI_MakeEdge(
+            gp_Pnt(*node_positions[n1]),
+            gp_Pnt(*node_positions[n2]),
+        ).Shape()
+        grillage_ais.append(AIS_Shape(edge))
+    self.viewer.model_ais_objects["Grillage"] = grillage_ais
+\end{lstlisting}
+
+\section{Node Numbers}
+Node identifiers are drawn as text labels with \texttt{\_render\_node\_numbers}. An early
+version placed each number inside a filled box; the final version renders the id as a plain
+\texttt{AIS\_TextLabel} with no background, in a near-black colour for legibility, and pushes
+the labels to the top Z-layer so they are never hidden behind the solid geometry.
+
+\begin{lstlisting}[caption={Node-id labels without a background box (\texttt{cad\_3d.py}).},label={lst:nodenumbers}]
+def _render_node_numbers(self) -> None:
+    """Display node-id labels without any background box."""
+    label_ais_list = []
+    for nid, (x_mm, y_mm, z_mm) in self._node_positions.items():
+        txt = AIS_TextLabel()
+        txt.SetText(str(nid))
+        txt.SetColor(Quantity_Color(0.05, 0.05, 0.05, Quantity_TOC_RGB))
+        txt.SetZLayer(_Z_TOP)   # keep labels above the model
+        label_ais_list.append(txt)
+    self.viewer.model_ais_objects["NodeNumbers"] = label_ais_list
+\end{lstlisting}
+
+\section{Hover Tooltip}
+Identifying a node visually is not enough---the user needs to point at one and read its number.
+This is implemented in \texttt{custom\_3dviewer.py}. The scene first hands the viewer the list
+of node positions and labels through \texttt{set\_node\_hover\_data}. On mouse move, the viewer
+projects every node from 3D world space to 2D screen pixels with the OCC view's
+\texttt{Convert()} routine (\texttt{\_project\_to\_screen}) and then picks the node closest to
+the cursor (\texttt{\_pick\_node\_label}).
+
+\begin{lstlisting}[caption={Screen-space projection and nearest-node picking (\texttt{custom\_3dviewer.py}).},label={lst:hover}]
+def set_node_hover_data(self, nodes: list | None) -> None:
+    """Store the node positions/labels used for hover tooltips."""
+    self._node_hover_data = nodes or []
+
+def _pick_node_label(self, phys_x, phys_y, log_x, log_y) -> str | None:
+    """Find the closest grillage node using screen-space projection."""
+    best_label, best_dist = None, HOVER_TOLERANCE
+    for node in self._node_hover_data:
+        sx, sy = self._project_to_screen(*node["pos"])
+        dist = ((sx - phys_x) ** 2 + (sy - phys_y) ** 2) ** 0.5
+        if dist < best_dist:
+            best_dist = dist
+            best_label = node["label"]
+    return best_label
+\end{lstlisting}
+
+\section{Show/Hide Toggles}
+Every overlay is a named group in \texttt{model\_ais\_objects} (\texttt{"Node"},
+\texttt{"Grillage"}, \texttt{"NodeNumbers"}), so visibility control is uniform: a single
+\texttt{update\_component\_visibility} method takes the list of currently selected components
+and shows or hides each group accordingly. This same mechanism is later reused by the toolbar
+toggles in Chapter~\ref{ch:toolbar}.
+
+\begin{lstlisting}[caption={Uniform visibility control over the named overlays (\texttt{cad\_3d.py}).},label={lst:visibility}]
+def update_component_visibility(self, selected_components: list) -> None:
+    show_nodes        = "Node"        in selected_components
+    show_node_numbers = "NodeNumbers" in selected_components
+    show_grillage     = "Grillage"    in selected_components
+    # ... show/erase each AIS group in the viewer accordingly ...
+    if show_node_numbers:
+        self._render_node_numbers()
+\end{lstlisting}
+
+\section{IFC Export Fix}
+\label{sec:ifcfix}
+While working in this area I also fixed a bug in the IFC export path
+(\texttt{core/ifc\_export\_bridge/bridge\_cad\_extraction.py}). The extraction code referenced
+bridge geometry keys under old names that no longer matched the parameter dictionary, so the
+export failed. The fix renamed the keys to the consistent \texttt{KEY\_TS\_} prefix used
+elsewhere---for example \texttt{KEY\_NO\_OF\_GIRDERS} became \texttt{KEY\_TS\_NO\_OF\_GIRDERS},
+and similarly for \texttt{KEY\_TS\_GIRDER\_SPACING} and \texttt{KEY\_TS\_DECK\_THICKNESS}---so
+that the 3D model could once again be exported to IFC.
+
+\section{Result}
+The 3D viewer now shows an interactive analysis overlay on top of the solid bridge model:
+nodes as spheres, members as a grillage, node numbers as clean labels, and a hover tooltip for
+identifying any node---each independently toggleable.
+
+%% IMAGE NEEDED: cad_nodes_grillage.png -- 3D view with node spheres + grillage edges + node numbers
+\osdagfig{cad_nodes_grillage.png}{The 3D CAD viewer with node markers, the grillage overlay,
+and node numbers displayed on top of the plate-girder model.}{fig:cadnodes}
+
+%% IMAGE NEEDED: cad_node_hover.png -- hover tooltip showing a node number under the cursor
+\osdagfig{cad_node_hover.png}{Hover tooltip identifying the node nearest the cursor.}{fig:cadhover}
+
+\section{Summary}
+This chapter added a full node/grillage visualisation layer to the OCC-based 3D viewer, with
+on-screen numbering, a projection-based hover tooltip, and uniform show/hide control, and fixed
+the IFC export along the way. The navigation modes introduced in the same viewer file
+(rotate, zoom-window, and pan) are covered together with their toolbar controls in
+Chapter~\ref{ch:toolbar}.

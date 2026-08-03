@@ -1,0 +1,100 @@
+\chapter{OsdagBridge Overview and Setup}
+\label{ch:setup}
+
+Before diving into individual features, this chapter gives a map of the OsdagBridge codebase
+and explains how a bridge design flows through the application. Understanding this structure
+makes the rest of the report easier to follow, because each later chapter modifies a small,
+well-defined part of this whole.
+
+\section{Repository Structure}
+OsdagBridge is a Python application organised as a single installable package under
+\texttt{src/osdagbridge}. The repository root contains the usual packaging and environment
+files (\texttt{pyproject.toml}, \texttt{requirements.txt}, \texttt{environment.yml}), plus
+\texttt{docs/}, \texttt{tests/}, \texttt{examples/plate\_girder/}, and the source tree. The
+important part for this report is the package itself:
+
+\begin{lstlisting}[language=bash,caption={High-level layout of the OsdagBridge package.},label={lst:tree}]
+src/osdagbridge/
+    core/                     # backend: analysis, design, reports
+        bridge_types/
+            plate_girder/
+                plategirderbridge.py    # plate-girder bridge module
+                plot_generator.py       # 2D/3D plot generation
+        bridge_components/    # reusable structural elements
+        reports/
+            report_generator.py         # design-report builder
+            __init__.py
+        input/  output/  solvers/  design_codes/
+    desktop/                  # frontend: PySide6 GUI
+        ui/
+            cad_3d.py                   # 3D CAD scene assembly
+            utils/
+                custom_3dviewer.py      # OCC viewer + navigation modes
+            docks/
+                input_dock.py           # Input Dock
+                output_dock.py          # Output Dock
+                cad_top_view.py         # top / plan plot view
+    cli/                      # command-line interface
+    web/                      # Django + React web application
+\end{lstlisting}
+
+The two halves that matter most for my work are:
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{\texttt{core/} --- the backend.} Pure-Python design logic with no GUI
+        dependencies. The plate-girder bridge type
+        (\texttt{core/bridge\_types/plate\_girder/plategirderbridge.py}) computes the design,
+        and the \texttt{core/reports} package turns the results into a PDF design report.
+  \item \textbf{\texttt{desktop/} --- the frontend.} A PySide6/Qt GUI. The
+        \texttt{ui/docks} package holds the Input Dock, Output Dock, and plot views, while the
+        CAD subsystem hosts the 3D viewer and its toolbar.
+\end{itemize}
+
+\section{The Plate-Girder Bridge Design Flow}
+A user's interaction with OsdagBridge follows a consistent pipeline, and every feature in this
+report plugs into one of its stages:
+
+\begin{enumerate}[leftmargin=1.6em]
+  \item \textbf{Input.} The user enters bridge parameters and material properties in the
+        \emph{Input Dock}. Inputs are validated before a design can run
+        (Chapter~\ref{ch:validators}).
+  \item \textbf{Design.} On pressing \emph{Design}, the plate-girder module solves the bridge
+        --- girders, deck slab, shear studs, bracings, and diaphragms --- and freezes the
+        results into an output dictionary (Chapter~\ref{ch:geometry}).
+  \item \textbf{Output \& visualisation.} Results are shown in the \emph{Output Dock}; the
+        \emph{3D CAD window} renders the model with nodes, a grillage, and a coordinate axis,
+        all navigable through a toolbar (Chapters~\ref{ch:cad}, \ref{ch:toolbar},
+        \ref{ch:axis}); 2D plots are drawn in the plot views
+        (Chapter~\ref{ch:plots}).
+  \item \textbf{Reporting.} The user generates a detailed, IS-code-based \emph{design report}
+        as a PDF, including calculations, summary tables, and plots
+        (Chapters~\ref{ch:report}, \ref{ch:plots}).
+\end{enumerate}
+
+%% IMAGE NEEDED: osdagbridge_gui.png -- full OsdagBridge window (input dock, CAD view, output dock, log)
+\osdagfig{osdagbridge_gui.png}{The OsdagBridge desktop application, showing the Input Dock,
+the 3D CAD window with a plate-girder bridge, the Output Dock, and the message log.}{fig:gui}
+
+\section{Development Setup}
+OsdagBridge is developed as a conda-based Python environment. A typical contributor workflow,
+and the one I used throughout the internship, is:
+
+\begin{lstlisting}[language=bash,caption={Local development setup.},label={lst:setup}]
+# clone and enter the repository
+git clone https://github.com/Aditya-Donde/OsdagBridge.git
+cd OsdagBridge
+
+# create the environment
+conda env create -f environment.yml
+conda activate osdagbridge
+
+# install the package in editable mode
+pip install -e .
+
+# launch the desktop application
+python -m osdagbridge.desktop
+\end{lstlisting}
+
+Work was contributed through GitHub pull requests against the maintainer's branches
+(\texttt{test}, \texttt{report}, and \texttt{dev}), each PR reviewed before being merged. The
+chapters that follow are organised by feature area, in the order the work was carried out, and
+each cites the pull request(s) in which the code was contributed.

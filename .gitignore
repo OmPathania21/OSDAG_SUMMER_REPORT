@@ -1,0 +1,16 @@
+# macOS Finder metadata (junk, never commit)
+.DS_Store
+**/.DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg

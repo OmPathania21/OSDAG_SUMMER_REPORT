@@ -1,0 +1,82 @@
+\chapter{Material Input Validators}
+\label{ch:validators}
+
+\emph{Pull request: \#259 (resolves issue \#245).}
+
+\section{Overview}
+The Input Dock lets advanced users override the default material properties with custom values.
+Without limits, nothing stopped a user from entering physically unrealistic numbers---a yield
+strength of zero, an impossible density---which would then flow into the design and produce
+meaningless or broken results. PR~\#259 added range validators for the custom material inputs of
+all four material-bearing components (girder, cross bracing, end diaphragm, and the concrete
+deck), correcting out-of-range entries and keeping the material's display name in step.
+
+\section{The Validation Rules}
+The rules live in the backend, in
+\texttt{core/bridge\_types/plate\_girder/validator.py}. A single
+\texttt{validate\_material\_inputs} method checks each field against a physically sensible range
+and returns a corrected value and a message when a value is out of bounds, or \texttt{None} when
+the input is valid:
+
+\begin{lstlisting}[caption={Range validation for custom material properties (\texttt{validator.py}).},label={lst:matvalidator}]
+def validate_material_inputs(self, key: str, inputs: dict):
+    """Validate custom material fields; return (corrected_value, message)
+    on failure, or None if the value is within range."""
+    # Weight Density   (kN/m3):  50.0 .. 120.0
+    # Yield Strength   Fy (MPa): 100.0 .. 1200.0
+    # Ultimate Tensile Fu (MPa): 100.0 .. 1500.0
+    # Modulus E        (GPa):    100.0 .. 300.0
+    # Poisson's Ratio:            0.0 .. 0.5
+    # Deck f_ck        (MPa):     10.0 .. 80.0
+    ...
+\end{lstlisting}
+
+The ranges apply to the steel members (girder, cross bracing, end diaphragm) and, for the deck,
+to the concrete compressive strength $f_{ck}$.
+
+\section{Live Validation in the Dialog}
+The material-properties dialog (\texttt{desktop/ui/dialogs/material\_properties.py}) applies these
+rules \emph{live}. Each field is connected through its \texttt{editingFinished} signal to
+\texttt{\_on\_material\_field\_edited}, so validation runs the moment the user leaves a field,
+and again for all fields on save via \texttt{\_validate\_and\_save}. When a value is out of
+range, \texttt{\_warn\_and\_autofill} warns the user and snaps the field to the nearest valid
+value:
+
+\begin{lstlisting}[caption={Live per-field validation and auto-fill (\texttt{material\_properties.py}).},label={lst:matdialog}]
+def _on_material_field_edited(self, key, widget):
+    """Validate a single field on focus-out (editingFinished)."""
+    result = self.validate_material_inputs(key, self._current_inputs())
+    if result is not None:
+        corrected, message = result
+        self._warn_and_autofill(widget, corrected, message)
+
+def _warn_and_autofill(self, widget, corrected, message):
+    QMessageBox.warning(self, "Invalid material input", message)
+    widget.setText(str(corrected))          # snap to nearest valid value
+    self._update_custom_material_name()     # keep the name string in sync
+\end{lstlisting}
+
+\section{Keeping the Custom Name in Sync}
+During review, a subtle bug was found and fixed. When a yield-strength value fell below the
+minimum, the validator correctly clamped the numeric value but the \emph{custom material name}
+string---which encodes the properties, e.g.\ the grade---was not being refreshed, so the label
+still displayed the old, invalid figure. The fix routes the auto-fill through
+\texttt{\_update\_custom\_material\_name}, so whenever a value is corrected the displayed
+material designation is regenerated to match. Follow-up review also surfaced errors when running
+the design with custom materials, which were addressed so the validated custom materials flow
+cleanly into the design.
+
+\section{Result}
+Custom material properties are now bounded to physically sensible ranges across all four
+components, out-of-range entries are auto-corrected with a clear warning, and the material's
+displayed name always reflects the actual values in use---removing a class of invalid inputs
+that previously reached the design stage.
+
+%% IMAGE NEEDED: material_validator.png -- the material dialog warning + auto-fill on an out-of-range value
+\osdagfig{material_validator.png}{The material-properties dialog rejecting an out-of-range yield
+strength and auto-filling the nearest valid value.}{fig:validator}
+
+\section{Summary}
+This chapter added range validators for custom material inputs in the Input Dock, with live
+auto-correcting feedback and a synchronised material name, closing issue~\#245 and preventing
+unrealistic material properties from entering an OsdagBridge design.

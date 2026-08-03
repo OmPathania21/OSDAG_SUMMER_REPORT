@@ -1,0 +1,81 @@
+\chapter{Conclusion and Lessons Learned}
+\label{ch:conclusion}
+
+\section{Summary of Contributions}
+Over the course of this internship I contributed across the full stack of OsdagBridge---the 3D
+CAD frontend, the toolbar and interaction layer, the backend geometry and design logic, and the
+automatically generated design report. In brief, the work delivered:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item An interactive analysis overlay in the 3D CAD viewer---node markers, a grillage of
+        members, on-screen node numbers, and a projection-based hover tooltip---with an IFC
+        export fix (Chapter~\ref{ch:cad}).
+  \item A dedicated toolbar controller wiring seven camera operations and a family of
+        visibility toggles across both the CAD and plot views, plus correct state management
+        across the design lifecycle (Chapter~\ref{ch:toolbar}).
+  \item Code-compliant shear-stud head geometry and an extensible
+        \texttt{bridge\_component\_solver} in the plate-girder backend
+        (Chapter~\ref{ch:geometry}).
+  \item A camera-synchronised coordinate-axis triad and context-aware toolbar filtering
+        (Chapter~\ref{ch:axis}).
+  \item A large share of the design report: the loads chapter with a key-first fallback, the
+        full Section~5 design-check tables, the Chapter~6 cross-bracing and end-diaphragm
+        drawings, a user-customisable chapter selection, a new design-log chapter, and the
+        asset-folder export fix (Chapter~\ref{ch:report}).
+  \item Off-screen Matplotlib plot capture with auto-cropping and a canvas-scaling zoom-window
+        for the plots (Chapter~\ref{ch:plots}).
+  \item UI/UX polish---a consistent custom cursor, a legend toggle over a cleaner axis, and
+        design-aware optional-component visibility (Chapter~\ref{ch:ui}).
+  \item Range validators for custom material inputs, with live auto-correction
+        (Chapter~\ref{ch:validators}).
+\end{itemize}
+
+All of this was contributed through reviewed pull requests, and each merged into the shared
+OsdagBridge codebase.
+
+\section{Lessons Learned}
+
+\subsection{Separate concerns into dedicated modules}
+The toolbar controller (Chapter~\ref{ch:toolbar}) is the clearest example: pulling all
+toolbar-driving logic out of the CAD widget into a \texttt{ToolBarController} made it possible to
+bind the same buttons to different views, add new toggles, and reset state cleanly. Wherever I
+introduced a clear seam---the controller, the geometry module, the per-chapter report
+functions---later changes became much easier.
+
+\subsection{Data-driven approaches reduce complexity}
+Storing overlays as named groups and toggling their visibility, tagging Matplotlib artists and
+flipping a flag, and reading report values through namespaced keys all avoided rebuilding state
+from scratch. Describing \emph{what} exists and querying it beat hard-coding \emph{how} to
+produce each case.
+
+\subsection{Fall back gracefully, never leave blanks}
+The key-first fallback in the report (Chapter~\ref{ch:report}) and the auto-fill in the material
+validators (Chapter~\ref{ch:validators}) share a philosophy: prefer the user's data, compute a
+code-compliant value when it is missing, and always show something sensible. This made the
+outputs robust to incomplete input.
+
+\subsection{Make the UI reflect reality}
+Several fixes---disabling the design button once inputs are frozen, resetting toggles on unlock,
+hiding Railing/Median when a design lacks them, and filtering the toolbar per view---came down to
+one principle: the interface should never offer or imply an action that does not apply to the
+current state.
+
+\subsection{Work with the platform's limits}
+Matplotlib has no 3D camera-fit, so the zoom-window physically scales the canvas
+(Chapter~\ref{ch:plots}); OpenCascade text labels needed a top Z-layer to stay visible
+(Chapter~\ref{ch:cad}). Understanding each library's constraints, and working with them rather
+than against them, was essential.
+
+\section{Working on an Open-Source Project}
+Beyond the code, the internship taught me how to contribute to a live, collaborative codebase:
+scoping work into reviewable pull requests, responding to maintainer feedback (for example moving
+Matplotlib out of the UI layer, and fixing the custom-material-name synchronisation), and
+iterating through force-pushes until a change was ready to merge. Some of my pull requests were
+closed and superseded by later ones as the work evolved---a normal and healthy part of
+open-source development, where the goal is the best final result, not any single patch.
+
+\section{Final Remarks}
+Contributing to OsdagBridge through the FOSSEE internship was an invaluable experience. I am
+grateful to the Osdag team and to FOSSEE for the opportunity, and I hope the features described
+in this report continue to serve the users of OsdagBridge in designing steel--concrete composite
+plate-girder bridges.

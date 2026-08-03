@@ -1,0 +1,164 @@
+\chapter{Toolbar System and Navigation}
+\label{ch:toolbar}
+
+\emph{Pull requests: \#111, \#123, \#126, \#132 (toolbar part), \#262.}
+
+\section{Overview}
+With node and grillage overlays in place (Chapter~\ref{ch:cad}), the next need was a clean way
+to \emph{drive} the 3D view: fit, zoom, pan, rotate, zoom-to-window, and toggle the various
+overlays. Rather than scatter this logic across the CAD widget, I introduced a dedicated
+\textbf{toolbar controller} that owns every toolbar button and wires it to the correct
+operation on whichever view is active---the 3D CAD view or the 2D plots view. This chapter
+covers the controller, the label-visibility toggles built on top of it, and the later
+state-management fixes.
+
+\section{The Toolbar Controller}
+The core of this work is a new module,
+\texttt{desktop/ui/utils/toolbar\_controller.py}, containing the
+\texttt{ToolBarController} class (PR~\#111). It separates the toolbar's behaviour from the CAD
+widget: the controller finds the toolbar buttons, connects them to camera operations, and can
+\texttt{reset()} itself to tear down all connections when the active view changes.
+
+\begin{lstlisting}[caption={Camera operations wired by the controller (\texttt{toolbar\_controller.py}).},label={lst:tbctrl}]
+class ToolBarController:
+    def _cad_zoom_fit(self):
+        """Fit all visible geometry in the OCC view."""
+        try:
+            if cad_widget.display is not None and not cad_widget._cad_init_pending:
+                cad_widget.display.FitAll()
+        except Exception:
+            pass
+
+    def _cad_zoom_in(self):   """Zoom in by a fixed 10% step."""
+    def _cad_zoom_out(self):  """Zoom out by a fixed 10% step."""
+    def _cad_toggle_pan(self):          ...   # delegate to viewer pan mode
+    def _cad_toggle_zoom_window(self):  ...   # delegate to viewer zoom-window
+    def _cad_toggle_rotate(self):       ...   # delegate to viewer rotate mode
+\end{lstlisting}
+
+Seven camera operations are exposed in total: \emph{zoom fit}, \emph{zoom in}, \emph{zoom
+out}, \emph{pan}, \emph{zoom window}, \emph{rotate}, and \emph{grillage toggle}. The pan,
+zoom-window, and rotate toggles delegate to the navigation modes I had added to the OCC viewer
+(\texttt{set\_navigation\_mode} in \texttt{custom\_3dviewer.py}, see
+Chapter~\ref{ch:cad})---for example the zoom-window mode uses the OCC \texttt{ZoomArea()} call
+with a \texttt{WindowFit()} fallback.
+
+The controller binds to whichever view is active through two public methods, and cleans up
+after itself:
+\begin{lstlisting}[caption={Binding the controller to a view, and resetting it.},label={lst:tbbind}]
+def bind_to_cad_3d(self, cad_widget):
+    """Wire the toolbar buttons to the 3D CAD view."""
+
+def bind_to_plots(self, plots_widget):
+    """Wire the toolbar buttons to the 2D plots view."""
+
+def reset(self):
+    """Remove all connections and restore the plain button appearance."""
+\end{lstlisting}
+
+\section{Bug Fixes and Cleanup}
+PR~\#123 stabilised the first iteration of the toolbar. It corrected the button
+\emph{highlight} states (buttons were showing as active when they were not), removed the
+temporary \emph{Zoom Fit / Zoom In / Zoom Out} buttons that had been used during development,
+made the pan operation work on the plot view, and fixed bugs in the navigation cube
+(\emph{navcube}) behaviour. This was the point at which the toolbar moved from a working
+prototype to a clean, production-ready control surface.
+
+\section{Label-Visibility Toggles}
+PR~\#126 added a group of toggle buttons for the on-model labels: \emph{node numbers},
+\emph{element numbers}, and \emph{girder labels}, available in both the 3D CAD view and the 2D
+plots. The toolbar buttons themselves are created as checkable buttons
+(\texttt{custom\_widgets.py}), the controller locates them by tooltip and wires them, and the
+plot widget applies the visibility to the underlying Matplotlib artists.
+
+\begin{lstlisting}[caption={Creating the checkable label-toggle buttons (\texttt{custom\_widgets.py}).},label={lst:tbtoggles}]
+self.btn_show_node_number = create_button(
+    ":/vectors/tool_bar/Node_Number.svg", "Node Number")
+self.btn_show_node_number.setCheckable(True)
+
+self.btn_show_element_number = create_button(
+    ":/vectors/tool_bar/Element_number.svg", "Element Number")
+self.btn_show_element_number.setCheckable(True)
+
+self.btn_show_girder_label = create_button(
+    ":/vectors/tool_bar/Girder_label.svg", "Girder Labels")
+self.btn_show_girder_label.setCheckable(True)
+\end{lstlisting}
+
+In the plots view, toggling a button simply flips a flag and re-applies visibility to the
+tagged text artists, then requests a redraw---a data-driven approach that avoids rebuilding the
+plot:
+
+\begin{lstlisting}[caption={Applying element-number visibility to Matplotlib artists (\texttt{mpl\_plot\_widget.py}).},label={lst:mplvis}]
+def _on_element_numbers_toggled(self, checked: bool):
+    self._show_element_numbers = checked
+    self._apply_element_number_visibility()
+    self._canvas.draw_idle()
+
+def _apply_element_number_visibility(self):
+    for ax in self._fig.axes:
+        for text in ax.texts:
+            if text.get_gid() == "element_number":
+                text.set_visible(self._show_element_numbers)
+\end{lstlisting}
+
+\section{State Management and Final Polish}
+The last round of toolbar work (PR~\#262) addressed three usability issues that surfaced once
+the toolbar was in daily use.
+
+\subsection{Resetting toggles on unlock}
+When the model is cleared or the inputs are unlocked, every CAD toggle should return to its
+off state so the UI does not lie about what is currently shown. I generalised the reset so it
+iterates over \emph{all} managed buttons---Grillage, Node, Node Number, Element Number, Rotate,
+Pan, Zoom Window, Axis, and Legend---rather than a hard-coded subset:
+
+\begin{lstlisting}[caption={Reset every managed toggle when the CAD overlays clear (\texttt{toolbar\_controller.py}).},label={lst:tbreset}]
+def sync_cad_overlays_off(self):
+    for btn in self._managed_buttons:
+        self._sync_btn_to(btn, False)
+\end{lstlisting}
+
+\subsection{Disabling the design button after a design}
+After running a design, the inputs freeze (lock). Previously the \emph{Design} button remained
+enabled, so a user could re-trigger a design with the exact same, now-frozen inputs. The fix
+ties the button's enabled state directly to the lock state inside
+\texttt{input\_dock.py}:
+
+\begin{lstlisting}[caption={Disable the design button whenever the inputs are locked (\texttt{input\_dock.py}).},label={lst:designbtn}]
+def toggle_lock(self):
+    ...
+    self.design_btn.setDisabled(self.is_locked)
+\end{lstlisting}
+
+A matching disabled style was added to the custom button stylesheet so the state is visually
+obvious:
+
+\begin{lstlisting}[language=,caption={Disabled-button styling (\texttt{custom\_buttons.py}).},label={lst:disabledqss}]
+QPushButton:disabled {
+    background-color: #D6E3A3;
+}
+\end{lstlisting}
+
+\subsection{Hand cursor for pan}
+Finally, to give the pan tool the feedback users expect, the viewer now shows an open-hand
+cursor while pan mode is active and the normal arrow otherwise, driven from
+\texttt{set\_navigation\_mode} in \texttt{custom\_3dviewer.py}.
+
+\section{Result}
+OsdagBridge gained a single, coherent toolbar that drives both the 3D CAD and 2D plot views:
+fit, zoom, pan, rotate, and zoom-window navigation; independent toggles for nodes, node
+numbers, element numbers, girder labels, the grillage, the axis, and the legend; consistent
+button highlight states; and correct enable/disable behaviour tied to the design lifecycle.
+
+%% IMAGE NEEDED: toolbar_full.png -- the complete toolbar with all buttons labelled
+\osdagfig{toolbar_full.png}{The OsdagBridge toolbar, driving the 3D CAD and plot views.}{fig:toolbar}
+
+%% IMAGE NEEDED: toolbar_labels_toggle.png -- 3D view with node/element/girder labels toggled on
+\osdagfig{toolbar_labels_toggle.png}{Node-number, element-number, and girder-label toggles
+applied to the model.}{fig:toolbarlabels}
+
+\section{Summary}
+The toolbar controller centralised all view-navigation logic into one reusable class, the
+label toggles gave the user fine-grained control over on-model annotations, and the final
+state-management fixes made the toolbar behave correctly across the full design lifecycle. The
+\emph{Axis} toggle referenced above is the subject of Chapter~\ref{ch:axis}.

@@ -1,0 +1,233 @@
+\chapter{Design Report Generation}
+\label{ch:report}
+
+\emph{Pull requests: \#138, \#145, \#155, \#162, \#169, \#187, \#188.}
+
+\section{Overview}
+The single largest part of my internship was the automatically generated \textbf{design
+report}---the PDF that summarises an entire plate-girder bridge design, from input parameters
+and loads through analysis, design checks, drawings, and quantities. Over seven pull requests I
+built and completed multiple chapters, sections, and summary tables of this report, added a
+key-first fallback strategy so tables are never left blank, contributed a new design-log
+chapter with its supporting logger, made the set of included chapters user-customisable, and
+fixed a bug in how report assets were written to disk. This chapter presents that work,
+organised the way the report itself is organised.
+
+\section{Report Generator Architecture}
+The report is produced by \texttt{core/reports/report\_generator.py}. Each chapter of the
+output PDF is built by its own function, which returns a block of LaTeX that the generator
+assembles and compiles. The chapter functions are:
+
+\begin{lstlisting}[caption={Per-chapter functions in the report generator (\texttt{report\_generator.py}).},label={lst:reportfns}]
+executive_summary()      # overview of the whole design
+ch1_project_info()       # project metadata
+ch2_input_parameters()   # input configuration
+ch3_loads()              # load cases (dead, live, wind, seismic, thermal)
+ch4_analysis()           # analysis results
+ch5_design_checks()      # design verification tables
+ch6_drawings()           # CAD drawings and section previews
+ch7_quantities()         # material take-off
+ch8_standards()          # standards & assumptions
+ch9_design_log()         # NEW: stage-completion log window
+ch9_references()         # references
+\end{lstlisting}
+
+Because each chapter is an independent function reading from a shared \texttt{output\_dict} and
+\texttt{input\_dict}, I could work on one report chapter at a time---which is exactly how the
+work was split across my pull requests.
+
+\section{Getting Chapter 6 Working}
+My first report contribution (PR~\#138) got Chapter~6 (Drawings) of the generated report
+working end-to-end within the generate-report flow, establishing the pattern I would reuse for
+the remaining chapters: pull the relevant values and figures from the design output, format them
+as LaTeX, and hand the block back to the generator.
+
+\section{Chapter 3 -- Loads and the Key-First Fallback}
+Chapter~3 of the report tabulates the load cases---dead, live, wind, seismic, and thermal. The
+challenge (PR~\#187) is that some values are supplied directly by the user while others must be
+\emph{computed} from IRC~6:2017. Rather than leaving blanks or hard-coding numbers, I adopted a
+consistent \emph{key-first fallback}: try to read the value from the input dictionary; only if
+it is missing, compute it from the relevant IRC~6 clause.
+
+\begin{lstlisting}[caption={Key-first fallback for wind and seismic values (\texttt{report\_generator.py}, \texttt{ch3\_loads}).},label={lst:fallback}]
+# Wind: use the stored hourly-mean values, else compute from IRC6 Table 12
+vz_val = input_dict.get(KEY_WL_HOURLY_MEAN_WIND)
+pz_val = input_dict.get(KEY_WL_HOURLY_WIND_PRESSURE)
+if not vz_val or not pz_val:
+    _res = IRC6_2017.table_12(float(_h), _ter, float(_vb))
+    if not vz_val:
+        vz_val = _res.get("Vz")
+
+# Seismic: use stored coefficients, else compute from IRC6 Cl. 218.5.1
+sl_zone_factor = input_dict.get(KEY_SL_ZONE_FACTOR)
+sl_ah = input_dict.get(KEY_SL_HORIZONTAL_COEFF)
+if not sl_ah or not sl_zone_factor:
+    _res = IRC6_2017.cl_218_5_1(zone=f"Zone {_z}", ...)
+    sl_zone_factor = sl_zone_factor or _res.get("Z")
+    sl_ah = sl_ah or _res.get("Ah")
+\end{lstlisting}
+
+The same pattern fills the Chapter~2 input-parameter tables and the Executive Summary, so every
+table in these sections is populated either from the user's data or from a code-compliant
+computed value---never left empty.
+
+\section{Chapter 5 -- Design Checks}
+Chapter~5 is the heart of the report: the design-verification tables. This was the largest
+single block of table work, spread over three pull requests.
+
+\subsection{Section 5.1 -- Girder and Stiffener Checks (Tables 5.9--5.16)}
+PR~\#155 completed Section~5.1, tables 5.9 through 5.16, covering bearing-stiffener capacity,
+deflection, and the controlling design summary. Each row compares a \emph{required} demand
+against a \emph{provided} capacity and reports a PASS/FAIL status, with failures highlighted in
+red:
+
+\begin{lstlisting}[caption={A design-check row: required vs.\ provided, with pass/fail (\texttt{report\_generator.py}).},label={lst:checkrow}]
+_bs_r = bridge.output_dict.get(KEY_SD_BS_R)
+def _bs_check(resist_key):
+    prov = bridge.output_dict.get(resist_key)
+    if prov is None or float(prov) <= 0.0 or _bs_r is None:
+        return ("N/A", "N/A", "N/A")
+    req_s  = f"{_bs_r} kN"
+    prov_s = f"{prov} kN"
+    status = "PASS" if float(prov) >= float(_bs_r) else r"\textcolor{red}{FAIL}"
+    return (req_s, prov_s, status)
+\end{lstlisting}
+
+Deflection checks (Table~5.10) iterate per girder, reading live-load and total deflections and
+comparing them against the allowable limits, and the design summary (Table~5.13) selects the
+\emph{controlling} check---the one with the highest demand-to-capacity ratio (DCR):
+
+\begin{lstlisting}[caption={Selecting the controlling design check by DCR (\texttt{report\_generator.py}).},label={lst:dcr}]
+for _gi, (lbl, _) in enumerate(girder_entries, start=1):
+    _live_mm  = bridge.output_dict.get(f"{KEY_SD_DEFL_LIVE}.G{_gi}")
+    _total_mm = bridge.output_dict.get(f"{KEY_SD_DEFL_TOTAL}.G{_gi}")
+    # ... build the row with values, allowable limit, and status ...
+
+ctrl = max(checks, key=lambda c: c.get("dcr") or 0.0)   # controlling load case
+\end{lstlisting}
+
+\subsection{Section 5.2 -- Deck Slab Design (Tables 5.17a--g)}
+PR~\#145 added Section~5.2, the deck-slab design, defining and using the keys behind tables
+5.17(a) through 5.17(g). These tables lay out the deck-slab design parameters and their
+code-based checks in the same required-vs-provided format.
+
+\subsection{Summary Table 5.22}
+PR~\#162 completed the Section~5 summary, Table~5.22, which consolidates the individual checks
+into a single overview of the design's governing results.
+
+\subsection{Girder side-view fix}
+While completing Section~5.1 I also corrected the import path for the girder side-view
+stiffener CAD preview used by Chapter~6, pointing it at
+\texttt{stiffener\_cad\_preview.StiffenerCadPreviewWidget} so the side-view drawing rendered
+correctly.
+
+\section{Chapter 6 -- Drawings (Sections 6.3 and 6.4)}
+PR~\#169 completed Chapter~6 by adding Sections 6.3 and 6.4---the cross-bracing and
+end-diaphragm layouts. Each is rendered as a labelled figure plus a row of three section
+previews (the bracing member and its top and bottom chords), laid out side by side using LaTeX
+\texttt{minipage} cells:
+
+\begin{lstlisting}[caption={Cross-bracing and end-diaphragm figures with side-by-side previews (\texttt{report\_generator.py}).},label={lst:secfig}]
+cbdia = _sec_fig(fig_paths.get('cb_diagram'), '6.3.1', 'Cross Bracing Layout')
+eddia = _sec_fig(fig_paths.get('ed_diagram'), '6.4.1', 'End Diaphragm Layout')
+
+def _sec_cell(...):
+    return (r'\begin{minipage}[t]{0.31\textwidth}' + ... + r'\end{minipage}')
+\end{lstlisting}
+
+The eight figures involved (a diagram plus three previews for each of the cross-bracing and
+end-diaphragm) are captured from the \texttt{TransverseMemberDesign} dialog on the output side
+(\texttt{output\_dock.py}) and stored in \texttt{figure\_data}; the plot-capture mechanism this
+relies on is described in Chapter~\ref{ch:plots}.
+
+\section{The Asset-Folder Fix}
+A bug surfaced when downloading the report as a PDF: an \texttt{assets} folder was being created
+inside the user's chosen output directory to hold the report logo, and it was left behind after
+export. In PR~\#169 I moved all logo handling inside the \texttt{TemporaryDirectory} used for
+LaTeX compilation, so the assets exist only for the duration of the build and are cleaned up
+automatically---leaving the user's output directory containing just the finished PDF.
+
+\begin{lstlisting}[caption={Report assets confined to the temporary build directory (\texttt{report\_generator.py}, \texttt{generate\_report}).},label={lst:assetfix}]
+with TemporaryDirectory() as tmp_dir:
+    tmp_assets = os.path.join(tmp_dir, 'assets')   # logo lives only here
+    # ... copy logo into tmp_assets, compile LaTeX, emit final PDF ...
+# no assets/ folder left in request.output_dir
+\end{lstlisting}
+
+\section{A Customisable Report and the Log-Window Chapter}
+The final report pull request (PR~\#188) made the report configurable and added a new chapter.
+
+\subsection{Choosing which chapters to include}
+The report-options dialog (\texttt{desktop/ui/dialogs/report\_options.py}) presents the report's
+chapters as a checklist. Core chapters---the Executive Summary and Chapters 1--3---are
+\emph{locked} and always included; the rest are optional. I added the new
+\texttt{"design\_log\_window"} chapter to this list, and the dialog returns the set of selected
+sections so the generator emits exactly the chapters the user wants:
+
+\begin{lstlisting}[caption={The report chapter checklist, with locked and optional entries (\texttt{report\_options.py}).},label={lst:reportopts}]
+_REPORT_CHAPTERS = [
+    # (label, canonical key, locked)
+    ("Executive Summary", "executive_summary", True),   # locked
+    ("Chapter 1 ...",     "ch1_project_info",  True),   # locked
+    # ... chapters 4-10 optional, including:
+    ("Design Log Window", "design_log_window", False),
+]
+
+def get_checked_leaf_sections(self):
+    """Return the canonical keys of the chapters the user selected."""
+\end{lstlisting}
+
+\subsection{The design-log chapter}
+The new \texttt{ch9\_design\_log} function turns the run's success log---the green
+stage-completion messages produced during a design---into a chapter of the report. The log
+lines are rendered in monospace, LaTeX special characters are escaped, and a fallback message
+is shown when there are no entries:
+
+\begin{lstlisting}[caption={The new design-log chapter (\texttt{report\_generator.py}).},label={lst:designlog}]
+def ch9_design_log(log_entries: List[str]) -> str:
+    """Render the captured stage-completion (success) log as a chapter."""
+    if not log_entries:
+        return _chapter_header(...) + "No design log entries"
+    # ... escape LaTeX specials, format each line in footnote-size monospace ...
+\end{lstlisting}
+
+This relies on a companion enhancement to the logger (\texttt{core/utils/logger.py}), where I
+extended \texttt{BridgeLogger} to accumulate success messages during a run and expose them:
+
+\begin{lstlisting}[caption={Capturing success messages in the logger (\texttt{logger.py}).},label={lst:logger}]
+class BridgeLogger:
+    def analysis_start(self):
+        self._success_log = []            # clear at the start of a run
+
+    def get_success_log(self) -> List[str]:
+        """Return the green (success) log lines captured during the run."""
+        return self._success_log
+    # _emit() now appends entries whose level == "success"
+\end{lstlisting}
+
+\section{Result}
+OsdagBridge produces a complete, IS/IRC-based design report in which every chapter I built is
+populated with real, code-compliant data: loads with computed fallbacks, full Section~5 design
+checks with pass/fail highlighting, cross-bracing and end-diaphragm drawings, a user-selectable
+set of chapters, and a design-log chapter capturing the run. The output directory is left clean
+after export.
+
+%% IMAGE NEEDED: report_ch5_checks.png -- a page of the generated report showing Section 5 design-check tables
+\osdagfig{report_ch5_checks.png}{A page of the generated design report showing Section~5 design
+checks with PASS/FAIL status.}{fig:repchecks}
+
+%% IMAGE NEEDED: report_options_dialog.png -- the report-options dialog with the chapter checklist
+\osdagfig{report_options_dialog.png}{The report-options dialog: locked core chapters and
+optional chapters, including the new Design Log Window.}{fig:repopts}
+
+%% IMAGE NEEDED: report_ch6_drawings.png -- report Chapter 6 with cross-bracing / end-diaphragm figures
+\osdagfig{report_ch6_drawings.png}{Report Chapter~6 drawings: cross-bracing and end-diaphragm
+layouts with section previews.}{fig:repdrawings}
+
+\section{Summary}
+Across seven pull requests I built a large share of the OsdagBridge design report: the loads
+chapter with a key-first fallback strategy, the complete Section~5 design-check tables, the
+Chapter~6 cross-bracing and end-diaphragm drawings, a customisable chapter selection, and a new
+design-log chapter with its supporting logger---plus the asset-folder fix that keeps report
+exports clean. The plots and section previews these chapters embed are captured through the
+mechanism described next, in Chapter~\ref{ch:plots}.

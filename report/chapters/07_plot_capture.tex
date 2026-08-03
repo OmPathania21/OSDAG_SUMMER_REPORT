@@ -1,0 +1,103 @@
+\chapter{Report Plot Capture and Zoom}
+\label{ch:plots}
+
+\emph{Pull requests: \#173, \#185.}
+
+\section{Overview}
+The design report (Chapter~\ref{ch:report}) is not just tables---it also embeds the analysis
+plots: bending-moment, shear-force, and deflection envelopes. This chapter covers two related
+pieces of plot work: capturing Matplotlib figures into the report as cropped PNG images
+(PR~\#173), and a zoom-window tool for the on-screen plots that works around Matplotlib's lack
+of a 3D camera-fit API (PR~\#185).
+
+\section{Capturing Plots into the Report}
+To appear in the PDF, a plot must be turned into an image. The capture logic lives in
+\texttt{core/bridge\_types/plate\_girder/plot\_generator.py}. The
+\texttt{capture\_report\_figures} function builds the envelope plots \emph{fully off-screen} and
+returns a dictionary of PNG bytes---one entry per figure---so no GUI or Matplotlib import is
+needed on the report side:
+
+\begin{lstlisting}[caption={Off-screen capture of the report figures (\texttt{plot\_generator.py}).},label={lst:capture}]
+def capture_report_figures(ds_all, nodes, members,
+                           edge_dist=0.0, eng_scale=1.0) -> dict:
+    """Build Envelope ULS analysis plots for the report - fully off-screen."""
+    data = {}
+    data['bm_envelope'] = _render_report_figure(bm_fig, show_max=True,  show_min=True)
+    data['sf_envelope'] = _render_report_figure(sf_fig, show_max=True,  show_min=True)
+    data['defl_ll']     = _render_report_figure(defl_fig, show_max=True, show_min=False)
+    return data
+\end{lstlisting}
+
+\subsection{Figure-to-bytes and auto-cropping}
+Each figure is rendered by \texttt{\_render\_report\_figure}, which annotates the plot, saves it
+to an in-memory PNG buffer, and---importantly---auto-crops the surrounding white border so the
+image sits neatly in the report rather than floating in whitespace. The cropping uses PIL to
+find the bounding box of the non-white content and adds a few pixels of padding:
+
+\begin{lstlisting}[caption={Rendering to PNG bytes with automatic white-border cropping (\texttt{plot\_generator.py}).},label={lst:crop}]
+def _render_report_figure(fig, show_max: bool, show_min: bool):
+    """Apply annotations, save to PNG bytes, auto-crop white borders, close."""
+    raw_buf = BytesIO()
+    fig.savefig(raw_buf, format='png', dpi=150)
+    plt.close(fig)
+
+    img = Image.open(raw_buf).convert('RGB')
+    bg  = Image.new('RGB', img.size, (255, 255, 255))
+    bbox = ImageChops.difference(img, bg).getbbox()   # non-white bounding box
+    if bbox:
+        left, top, right, bottom = bbox
+        img = img.crop((left - 4, top - 4, right + 4, bottom + 4))  # 4px padding
+    out = BytesIO(); img.save(out, format='png')
+    return out.getvalue()
+\end{lstlisting}
+
+The captured bytes are stored directly in the \texttt{figure\_data} dictionary and handed to the
+report generator. On the desktop side, \texttt{output\_dock.py} calls
+\texttt{capture\_report\_figures} from its report handler and merges the result into
+\texttt{figure\_data} before generation. A review point on this PR---that Matplotlib should not
+be imported in the UI layer---was addressed by keeping all figure work inside the
+\texttt{core} plot generator and passing only bytes across to the frontend.
+
+\section{The Plot Zoom Window}
+The 3D CAD view has a true camera and can zoom-to-window through OpenCascade
+(Chapter~\ref{ch:toolbar}). The 2D/3D Matplotlib plots have no such API. PR~\#185 solves this by
+\emph{physically scaling the canvas} inside a \texttt{QScrollArea} and scrolling to the selected
+region---the effect looks identical to a camera zoom-window.
+
+The user drags a rubber-band rectangle over the plot; on release, \texttt{\_execute\_zoom\_window}
+computes the scale factor that makes the selected rectangle fill the viewport, resizes the
+canvas, and scrolls so the selection is centred:
+
+\begin{lstlisting}[caption={Zoom-to-window by scaling the canvas in a scroll area (\texttt{mpl\_plot\_widget.py}).},label={lst:zoomwin}]
+def _execute_zoom_window(self, rect):
+    """Zoom so the selected screen rectangle fills the scroll-area viewport."""
+    factor    = min(vp_w / rect.width(), vp_h / rect.height())
+    new_scale = min(self._zoom_scale * factor, 8.0)   # cap the zoom
+    self._zoom_scale = new_scale
+    self._apply_zoom()                                # physically resize canvas
+    h_bar.setValue(...); v_bar.setValue(...)          # scroll to centre selection
+\end{lstlisting}
+
+The rubber-band selection itself is handled by a small set of Matplotlib event callbacks
+(\texttt{\_zwin\_on\_press}, \texttt{\_zwin\_on\_motion}, \texttt{\_zwin\_on\_release}), enabled
+by \texttt{\_toggle\_zoom\_window}. The toolbar wires the button to the plot through
+\texttt{\_plots\_toggle\_zoom\_window} in the controller, keeping the zoom-window mode mutually
+exclusive with pan and rotate.
+
+\section{Result}
+Analysis plots are captured into the report as tightly-cropped PNG images produced entirely
+off-screen, and the on-screen plots gained a zoom-window tool that behaves like the CAD view's
+despite Matplotlib having no native equivalent.
+
+%% IMAGE NEEDED: report_plot_capture.png -- an analysis envelope plot as embedded in the report
+\osdagfig{report_plot_capture.png}{A bending-moment envelope plot captured and auto-cropped for
+the design report.}{fig:plotcapture}
+
+%% IMAGE NEEDED: plot_zoom_window.png -- the plot view with a rubber-band zoom selection
+\osdagfig{plot_zoom_window.png}{The plot zoom-window: dragging a rectangle scales the canvas so
+the selection fills the viewport.}{fig:plotzoom}
+
+\section{Summary}
+This chapter added off-screen Matplotlib capture with automatic cropping to feed plots into the
+design report, and a canvas-scaling zoom-window that gives the 2D plots a camera-like
+zoom-to-region despite Matplotlib's API limitations.

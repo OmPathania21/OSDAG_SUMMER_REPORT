@@ -1,0 +1,127 @@
+\chapter{UI/UX Enhancements}
+\label{ch:ui}
+
+\emph{Pull requests: \#189, \#192, \#246.}
+
+\section{Overview}
+This chapter gathers three user-experience improvements that sharpened the OsdagBridge
+interface: a custom pointing-hand cursor applied consistently across the application
+(PR~\#189), a \emph{Legends} toggle in the toolbar together with a cleaner axis gizmo
+(PR~\#192), and conditional visibility for the optional Railing and Median components so the
+CAD panel only offers toggles for parts the design actually contains (PR~\#246).
+
+\section{Custom Cursor}
+Qt's built-in pointing-hand cursor looks different across platforms, and on Linux in particular
+it did not match the rest of the UI. PR~\#189 introduced a programmatically drawn cursor in a
+new module, \texttt{desktop/ui/utils/custom\_cursors.py}. The hand is defined as a small pixel
+grid and rendered at 8$\times$ supersampled resolution, then scaled down for smooth edges:
+
+\begin{lstlisting}[caption={Programmatically generated pointing-hand cursor (\texttt{custom\_cursors.py}).},label={lst:cursor}]
+def _create_pointing_hand_pixmap(size: int = 32) -> QPixmap:
+    """Create a classic upright pointing-hand cursor with smooth edges."""
+    cursor_data = [                 # 0 = transparent, 1 = outline, 2 = fill
+        "00000000000111100000000000000000",
+        "00000000001222100000000000000000",
+        # ... 32 rows total ...
+    ]
+    supersample = 8                 # render hi-res, then scale down smoothly
+    ...
+
+def pointing_hand_cursor() -> QCursor:
+    """Custom hand cursor on Linux, standard cursor elsewhere."""
+    return get_cursor(Qt.CursorShape.PointingHandCursor)
+\end{lstlisting}
+
+Every place that previously used \texttt{Qt.PointingHandCursor} now calls
+\texttt{pointing\_hand\_cursor()} instead---the checkboxes in \texttt{cad\_3d.py}, the additional
+-inputs button in \texttt{input\_dock.py}, dialog buttons in \texttt{material\_properties.py},
+and the base custom button in \texttt{custom\_buttons.py}---so the whole application shares one
+consistent cursor.
+
+\section{Legend Toggle and a Cleaner Axis}
+PR~\#192 added a \emph{Legends} button to the toolbar. Like the other toggles, the button is
+created in \texttt{custom\_widgets.py} and wired by the controller; toggling it shows or hides
+the bottom-left information table (\texttt{\_info\_table}) that lists the bridge parameters:
+
+\begin{lstlisting}[caption={The legend toggle button and its handler (\texttt{custom\_widgets.py}, \texttt{toolbar\_controller.py}).},label={lst:legend}]
+# custom_widgets.py -- create the button
+create_button(":/vectors/tool_bar/legend_icon.svg", "Legends")
+
+# toolbar_controller.py -- find and toggle it
+_TIP_LEGEND = "Legends"
+self._btn_legend = self._find_button(self._TIP_LEGEND)
+
+def _cad_toggle_legend(self):
+    table = self._cad_widget._info_table
+    if self._btn_legend.isChecked():
+        table.show()
+        self._cad_widget._position_info_table()
+    else:
+        table.hide()
+\end{lstlisting}
+
+The same PR also removed the grey rounded box that had been drawn behind the coordinate-axis
+triad (Chapter~\ref{ch:axis}). The triad's \texttt{paintEvent} now draws only the axis arrows on
+a translucent background, dropping the \texttt{drawRoundedRect} call and the grey brush, so the
+gizmo sits cleanly over the model.
+
+\section{Optional-Component Visibility}
+The CAD component panel offers a checkbox per bridge part. But not every design has a footpath
+railing or a median---showing those toggles regardless was misleading. PR~\#246 made Railing and
+Median \emph{optional}: their toggles appear only when the design actually includes them.
+
+A set marks which components are optional, and \texttt{set\_available\_components} hides the ones
+the current design does not have, remembering them in \texttt{self.\_unavailable}:
+
+\begin{lstlisting}[caption={Marking components optional and hiding unavailable ones (\texttt{cad\_3d.py}).},label={lst:optional}]
+OPTIONAL_KEYS = {"Railing", "Median"}
+
+# availability from the design parameters
+railing_available = getattr(design_params, "footpath_config", "NONE") != "NONE"
+median_available  = getattr(design_params, "enable_median", False)
+
+def set_available_components(self, available):
+    """Show toggles for available components; uncheck + hide the rest."""
+    for key in OPTIONAL_KEYS:
+        if key not in available:
+            self._checkboxes[key].setChecked(False)
+            self._checkboxes[key].hide()
+            self._unavailable.add(key)
+\end{lstlisting}
+
+Crucially, hidden components are also excluded when the panel \emph{collects} the selected
+components for rendering, so an absent part can never be switched on---even through the master
+``Bridge'' toggle:
+
+\begin{lstlisting}[caption={Excluding unavailable components from the render selection (\texttt{cad\_3d.py}).},label={lst:collect}]
+def _collect(self):
+    selected = []
+    for key, cb in self._checkboxes.items():
+        if key in self._unavailable:
+            continue                  # never render a component the design lacks
+        if cb.isChecked():
+            selected.append(key)
+    return selected
+\end{lstlisting}
+
+Availability is recomputed on every render (in \texttt{render\_3d\_cad}, before the model is
+loaded), so the toggles correctly reappear when the user switches to a design that does contain
+a footpath or median.
+
+\section{Result}
+The application now shares one consistent hand cursor, offers a Legends toggle over a cleaner
+axis gizmo, and shows Railing/Median toggles only when the design includes those components---so
+the CAD panel always matches the actual geometry.
+
+%% IMAGE NEEDED: custom_cursor.png -- the custom pointing-hand cursor over the UI
+\osdagfig{custom_cursor.png}{The custom pointing-hand cursor used consistently across
+OsdagBridge.}{fig:cursor}
+
+%% IMAGE NEEDED: optional_components.png -- CAD panel where Railing/Median toggles are hidden vs shown
+\osdagfig{optional_components.png}{The Railing and Median toggles appear only when the design
+includes those components.}{fig:optional}
+
+\section{Summary}
+These three enhancements---a consistent custom cursor, a legend toggle with a cleaner axis, and
+design-aware optional-component visibility---made the OsdagBridge interface more consistent and
+less confusing, ensuring the controls the user sees always reflect the current design.
