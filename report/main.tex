@@ -29,7 +29,7 @@
 \usepackage{amssymb}
 \usepackage{titlesec}
 \usepackage{fancyhdr}
-\usepackage[hidelinks]{hyperref}
+\usepackage{hyperref}
 
 %------------------------------------------------------------- graphics path
 \graphicspath{{images/}{../Media/}}
@@ -41,6 +41,16 @@
 \definecolor{codecomment}{RGB}{102,153,102}
 \definecolor{codestring}{RGB}{170,55,55}
 \definecolor{codeframe}{RGB}{220,220,220}
+
+%----------------------------------------- clickable links (TOC, figures, refs)
+\hypersetup{
+    colorlinks=true,
+    linkcolor=osdagblue,   % internal links: TOC, sections, figures, \ref
+    citecolor=osdagblue,
+    urlcolor=osdagblue,
+    bookmarksnumbered=true,
+    bookmarksopen=true,
+}
 
 %---------------------------------------------------- ONE listings style (Python)
 \lstdefinestyle{osdag}{
